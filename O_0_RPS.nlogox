@@ -21,7 +21,7 @@ to go
 
   clear-participation
   let players turtles with [
-    any? turtles-on neighbors4
+    count turtles-on neighbors4 > 0
   ]
   ask players [ play ]
   tick
@@ -198,6 +198,11 @@ Source: Hammond and Axelrod (2006), The Evolution of Ethnocentrism, manuscript p
 Professor Jose Manuel MAGALLANES  
 Complexity and ABM, 2026  
 DACSS - UMASS
+
+
+### NetLogo Web compatibility
+
+The player filter uses `count turtles-on neighbors4 > 0` to select agents with at least one neighboring agent. This is equivalent to the intended `any?` test and avoids the incorrect result reproduced with that expression in NetLogo Web. Every occupied neighboring pair still plays once per tick.
 ]]></info>
   <turtleShapes>
     <shape name="default" rotatable="true" editableColorIndex="0">
