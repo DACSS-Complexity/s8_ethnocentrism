@@ -1,69 +1,127 @@
 <?xml version="1.0" encoding="utf-8"?><model version="NetLogo 7.0.3" snapToGrid="false">
   <code><![CDATA[turtles-own [
-  score played? original-color
+  score
+  played?
+  original-color
   group-tag
-  cooperate-with-same?
-  cooperate-with-different?
+  profile
 ]
+
+
+;; Observer procedures
 
 to setup
   clear-all
   ask patches [ set pcolor white ]
-  ask n-of 100 patches [
-    sprout 1 [
-    set shape "circle"
-    set group-tag random 4
-    set cooperate-with-same? (random 2 = 0)
-    set cooperate-with-different? (random 2 = 0)
-    set original-color item group-tag [blue green orange violet]
-    if cooperate-with-same? and cooperate-with-different? [ set shape "circle" ]
-    if cooperate-with-same? and not cooperate-with-different? [ set shape "square" ]
-    if not cooperate-with-same? and not cooperate-with-different? [ set shape "triangle" ]
-    if not cooperate-with-same? and cooperate-with-different? [ set shape "x" ]
-    set color original-color
-    set size 0.8
-    set score 0
-    set played? false
-    ]
-  ]
+  populate
   reset-ticks
 end
 
 to go
-  if not any? turtles [ stop ]
+  if ticks >= 2000 or count turtles = 0 [ stop ]
+
+  reset-scores
+  clear-participation
+  let players turtles with [
+    count turtles-on neighbors4 > 0
+  ]
+  ask players [ play ]
+  ask turtles [ reproduce ]
+  ask turtles [ face-death ]
+  tick
+end
+
+to reset-scores
   ; Only this tick's payoffs affect reproduction.
   ask turtles [ set score 0 ]
+end
+
+to clear-participation
   ask patches [ set pcolor white ]
   ask turtles [
     set color original-color
     set played? false
   ]
-  ; Stationary agents: each undirected neighbor pair plays once.
-  ; The who comparison prevents counting the same pair twice.
-  ask turtles [
-    let focal self
-    ask turtles-on neighbors4 [
-      if who > [who] of focal [
-        play-pd focal
-      ]
-    ]
-  ]
-  ; Only agents present at the start of this stage can reproduce.
-  ask turtles [ reproduce ]
-  ; Random death is independent of score; newborns are included.
-  ask turtles [
-    if random-float 100 < 10 [ die ]
-  ]
-  tick
 end
 
+to populate
+  ask n-of 100 patches [
+    sprout 1 [ initialize-agent ]
+  ]
+end
+
+
+
+
+;; Turtle procedures
+
+to initialize-agent
+  ; Random assignment happens once at setup, not during play.
+  set group-tag random 4
+  set profile one-of ["humanitarian" "ethnocentric" "egoist" "traitorous"]
+  set size 0.8
+  set score 0
+  set played? false
+  update-appearance
+end
+
+to update-appearance
+  set original-color item group-tag [blue green orange violet]
+  set color original-color
+  if profile = "humanitarian" [ set shape "circle" ]
+  if profile = "ethnocentric" [ set shape "square" ]
+  if profile = "egoist" [ set shape "triangle" ]
+  if profile = "traitorous" [ set shape "x" ]
+end
+
+to play
+  ; Each neighboring pair plays once, rather than once per agent.
+  let focal self
+  let opponents (turtles-on neighbors4) with [
+    who > [who] of focal
+  ]
+
+  ask opponents [
+    ; Inside this ask, self is the neighbor and focal is the initiator.
+    ; Each player applies its own rule to the other's tag.
+    let neighbor self
+    let my-action action-toward focal
+    let their-action [action-toward neighbor] of focal
+    let my-payoff pd-payoff my-action their-action
+    let their-payoff pd-payoff their-action my-action
+
+    receive-payoff my-payoff
+    ask focal [ receive-payoff their-payoff ]
+  ]
+end
+
+to receive-payoff [points]
+  set score score + points
+  mark-participation
+end
+
+to mark-participation
+  set played? true
+end
+
+
+;; Game rules
+
+to-report pd-payoff [my-action their-action]
+  ; Cooperation costs 1 and gives the recipient 3.
+  if my-action = 0 and their-action = 0 [ report 2 ]
+  if my-action = 0 and their-action = 1 [ report -1 ]
+  if my-action = 1 and their-action = 0 [ report 3 ]
+  report 0  ; both defect
+end
+;; Demographic procedures: all agents are eligible, including isolates.
+
 to reproduce
-  let birth-chance max (list 0 (min (list 100 (12 + score))))
-  if random-float 100 < birth-chance [
-    let vacancies neighbors4 with [not any? turtles-here]
-    if any? vacancies [
+  if random-float 100 < birth-probability [
+    let vacancies neighbors4 with [count turtles-here = 0]
+    if count vacancies > 0 [
       let destination one-of vacancies
-      ; hatch inherits the tag and both cooperation rules unchanged.
+      ; hatch inherits the parent's profile and group-tag unchanged.
       hatch 1 [
         move-to destination
         set score 0
@@ -74,83 +132,171 @@ to reproduce
   ]
 end
 
-to play-pd [opponent]
-  ; 0 = cooperate, 1 = defect.
-  ; Each player uses its own inherited rule and compares stable tags.
-  let focal self
-  let my-action action-toward opponent
-  let their-action [action-toward focal] of opponent
-  let my-payoff 0
-  let their-payoff 0
-  if my-action = 0 and their-action = 0 [
-    set my-payoff 2
-    set their-payoff 2
-  ]
-  if my-action = 0 and their-action = 1 [
-    set my-payoff -1
-    set their-payoff 3
-  ]
-  if my-action = 1 and their-action = 0 [
-    set my-payoff 3
-    set their-payoff -1
-  ]
-  if my-action = 1 and their-action = 1 [
-    set my-payoff 0
-    set their-payoff 0
-  ]
-  set score score + my-payoff
-  set played? true
-  ask opponent [
-    set score score + their-payoff
-    set played? true
-  ]
+to face-death
+  if random-float 100 < 10 [ die ]
 end
 
+;; Turtle reporter: probability expressed as a percentage.
+to-report birth-probability
+  report max (list 0 (min (list 100 (12 + score))))
+end
+
+;; Turtle reporter: deterministic action, 0 = cooperate, 1 = defect.
 to-report action-toward [opponent]
-  if group-tag = [group-tag] of opponent [
-    ifelse cooperate-with-same? [ report 0 ] [ report 1 ]
+  ; Local flag: computed for this encounter, not stored as agent state.
+  let same-group? (group-tag = [group-tag] of opponent)
+
+  if profile = "humanitarian" [ report 0 ]
+  if profile = "egoist" [ report 1 ]
+  if profile = "ethnocentric" [
+    ifelse same-group? [ report 0 ] [ report 1 ]
   ]
-  ifelse cooperate-with-different? [ report 0 ] [ report 1 ]
+  if profile = "traitorous" [
+    ifelse same-group? [ report 1 ] [ report 0 ]
+  ]
+  error (word "Unknown profile: " profile)
+end
+
+;; Observer reporters for the population plot.
+to-report humanitarian-count
+  report count turtles with [profile = "humanitarian"]
+end
+
+to-report ethnocentric-count
+  report count turtles with [profile = "ethnocentric"]
+end
+
+to-report egoist-count
+  report count turtles with [profile = "egoist"]
+end
+
+to-report traitorous-count
+  report count turtles with [profile = "traitorous"]
 end
 ]]></code>
   <widgets>
-    <view x="10" y="65" width="433" height="433" minPxcor="-16" maxPxcor="16" minPycor="-16" maxPycor="16" patchSize="13.0" wrappingAllowedX="true" wrappingAllowedY="true" frameRate="30.0" showTickCounter="true" tickCounterLabel="ticks" fontSize="10" updateMode="1"/>
-    <button x="10" y="10" width="95" height="40" display="setup" forever="false" kind="Observer" disableUntilTicks="false">setup</button>
-    <button x="115" y="10" width="95" height="40" display="go" forever="true" kind="Observer" disableUntilTicks="true">go</button>
-    <button x="220" y="10" width="95" height="40" display="go once" forever="false" kind="Observer" disableUntilTicks="true">go</button>
-    
-    
-  <monitor x="455" y="65" width="130" height="60" display="Population" precision="0" fontSize="12">count turtles</monitor><plot x="455" y="140" width="510" height="350" display="Population by strategy" xAxis="Ticks" yAxis="Agents" xMin="0.0" xMax="100.0" yMin="0.0" yMax="100.0" autoPlotX="true" autoPlotY="true" legend="true"><setup/><update/><pen display="Humanitarian" interval="1.0" mode="0" color="-16777216" legend="true"><setup/><update>plot count turtles with [cooperate-with-same? and cooperate-with-different?]</update></pen><pen display="Ethnocentric" interval="1.0" mode="0" color="-2674135" legend="true"><setup/><update>plot count turtles with [cooperate-with-same? and not cooperate-with-different?]</update></pen><pen display="Egoist" interval="1.0" mode="0" color="-13345367" legend="true"><setup/><update>plot count turtles with [not cooperate-with-same? and not cooperate-with-different?]</update></pen><pen display="Traitorous" interval="1.0" mode="0" color="-10899396" legend="true"><setup/><update>plot count turtles with [not cooperate-with-same? and cooperate-with-different?]</update></pen></plot></widgets>
-  <info><![CDATA[## O_4: Group-conditional PD with per-tick score reset
-The only behavioral change from O_3 is resetting every agent's score to zero at the start of each tick. Reproduction therefore depends on this tick's payoffs, not accumulated lifetime payoffs. Group-conditional behavior is retained. Each agent has a group-tag (0 to 3) and two independent Boolean rules: cooperate-with-same? and cooperate-with-different?. Tags and rules are assigned randomly at setup. The payoff and demographic procedures stay the same.
+    <view x="10" wrappingAllowedX="true" y="65" frameRate="30.0" minPycor="-16" height="433" showTickCounter="true" patchSize="13.0" fontSize="10" wrappingAllowedY="true" width="433" tickCounterLabel="ticks" maxPycor="16" updateMode="1" maxPxcor="16" minPxcor="-16"/>
+    <button x="10" y="10" height="40" disableUntilTicks="false" forever="false" kind="Observer" width="95" display="setup">setup</button>
+    <button x="115" y="10" height="40" disableUntilTicks="true" forever="true" kind="Observer" width="95" display="go">go</button>
+    <button x="220" y="10" height="40" disableUntilTicks="true" forever="false" kind="Observer" width="95" display="go once">go</button>
+    <monitor x="455" precision="0" y="65" height="60" fontSize="12" width="130" display="Population">count turtles</monitor>
+    <plot x="455" autoPlotX="true" yMax="100.0" autoPlotY="true" yAxis="Agents" y="140" xMin="0.0" height="350" legend="true" xMax="100.0" yMin="0.0" width="510" xAxis="Ticks" display="Population by strategy">
+      <setup/>
+      <update/>
+      <pen interval="1.0" mode="0" display="Humanitarian" color="-16777216" legend="true">
+        <setup/>
+        <update>plot humanitarian-count</update>
+      </pen>
+      <pen interval="1.0" mode="0" display="Ethnocentric" color="-2674135" legend="true">
+        <setup/>
+        <update>plot ethnocentric-count</update>
+      </pen>
+      <pen interval="1.0" mode="0" display="Egoist" color="-13345367" legend="true">
+        <setup/>
+        <update>plot egoist-count</update>
+      </pen>
+      <pen interval="1.0" mode="0" display="Traitorous" color="-10899396" legend="true">
+        <setup/>
+        <update>plot traitorous-count</update>
+      </pen>
+    </plot>
+  </widgets>
+  <info><![CDATA[## O_4: Current-tick payoffs determine reproduction
 
-| Strategy | Same group | Different group | Shape |
+### Purpose: reset scores each tick
+
+O_4 retains O_3's explicit inherited profiles, group tags, PD payoffs, spatial interactions, reproduction and random death. The only new mechanism is reset-scores, called before games each tick. Past scores no longer accumulate into future birth chances.
+
+Cooperation choices remain nonrandom: each agent's profile and the partner's tag determine its action. Profiles and tags persist and are inherited unchanged.
+
+### How to use
+
+Click setup, then go or go once. The run stops at 2000 ticks or extinction. Setup starts 100 agents on distinct random patches in a 33 by 33 wrapping world. Existing agents never relocate. Birth places offspring on neighboring empty patches.
+
+### Agent states
+
+- score: current-tick PD payoff, initially zero and reset before games each tick. It affects that tick's birth probability.
+- played?: whether the agent participated this tick, reset each tick. It does not limit games.
+- original-color: the display color associated with its group.
+- group-tag: an observable group marker (0 to 3).
+- profile: humanitarian, ethnocentric, egoist, or traitorous.
+
+The two cooperation flags are no longer stored. The profile directly represents behavior. `same-group?` is a temporary local flag computed inside action-toward for the current encounter, not a turtles-own state. Neighbors are also computed when needed.
+
+### Four profiles
+
+| Profile | Same group | Different group | Shape |
 | --- | --- | --- | --- |
 | Humanitarian | Cooperate | Cooperate | Circle |
 | Ethnocentric | Cooperate | Defect | Square |
 | Egoist | Defect | Defect | Triangle |
 | Traitorous | Defect | Cooperate | X |
 
-Each player applies its own rule to the opponent's tag. Neither player knows the opponent's rule or learns from past payoffs. Offspring inherit the tag, both rules, original color, and strategy shape unchanged; scores reset to zero. No mutation occurs.
+Each agent has one profile and one group. Any profile can occur in any of the four groups. A blue traitorous agent helps green, orange, and violet neighbors, but withholds help from blue neighbors.
 
-Group colors: tag 0 blue, 1 green, 2 orange, 3 violet. Agents always display their group color. Decisions compare group-tag, independently of display color. Shapes distinguish strategies. This combines the tag and its two conditional rules into the single conditional-behavior step; no new demographic mechanism is added.
+Profiles are specified possibilities. Their population prevalence is an outcome to investigate. Agents neither invent profiles nor learn new ones during life.
 
-## SPACE AND SCHEDULE
-100 agents start at score zero on randomly selected distinct patches in a 33 by 33 wrapping world. Agents stay in place. Each neighbors4 pair plays once per tick; who ordering prevents double-counting. No same-patch or diagonal interaction occurs.
+### Initialization and schedule
 
-After games, every current agent gets one reproduction attempt in random order. Birth probability (%) = max(0, min(100, 12 + this tick's score)). A successful attempt produces one offspring on a randomly selected empty neighboring patch if one exists. Scores are not spent. Offspring start at score zero, do not play or reproduce until next tick, and are included in the subsequent independent 10% death chance. Extinction stops the run. Birth placement, birth baseline, and random death remain as in O_3; score persistence alone changes.
+setup clears the world, colors patches white, calls populate, and resets CLOCK. populate creates one agent on each of 100 distinct patches. initialize-agent randomly assigns a tag and selects one of the four profiles with equal probability, initializes its states, and calls update-appearance.
 
-## PAYOFFS
-Cooperation costs 1 and gives the opponent 3.
-| Action | Cooperate | Defect |
-| --- | --- | --- |
-| Cooperate | 2, 2 | -1, 3 |
-| Defect | 3, -1 | 0, 0 |
+go remains succinct:
+1. Check the fixed 2000-tick limit and extinction condition.
+2. reset-scores sets every agent's score to zero, including isolates.
+3. clear-participation restores group colors and clears played?.
+4. Find agents with neighboring partners using count turtles-on neighbors4 > 0.
+5. Ask selected agents to play.
+6. Ask agents to reproduce, using this tick's payoffs.
+7. Ask the current population to face-death.
+8. tick advances CLOCK and updates outputs.
 
-These are Hammond-Axelrod's cost/benefit increments scaled by 100. Resetting score to zero and adding a baseline of 12 at reproduction is equivalent to resetting reproductive potential to 12 before applying this tick's payoffs. This aligns payoff persistence with Hammond-Axelrod; the initial population and absence of immigration and mutation remain differences. No immigration or mutation is included here.
+The reset changes score only. It does not alter profile, tag, position, population, or appearance. An agent with no games that tick has score zero and baseline birth probability 12%, subject to an empty neighboring patch.
 
-## DISPLAY
-Agents retain their group colors throughout interactions. Patches remain white; game locations are not highlighted. The line plot tracks counts of the four strategies over ticks; line colors identify strategies, while agent colors identify groups. The population monitor shows total current count. Scores remain internal to the birth calculation and are not displayed. A persistent isolated agent has no games and stays at score zero. Strategy counts reflect births and deaths; their sum equals the total population.
+### Choosing and playing
+
+play visits occupied cardinal neighbors, including across wrapping boundaries. It resolves each neighboring pair once, using the higher-who comparison to prevent duplicates. Both actions and payoffs are calculated together. Agents play every eligible neighboring partner; no single game partner is selected randomly.
+
+Inside ask opponents, neighbor stores the active neighboring agent and focal stores the initiator. Each player calls action-toward from its own perspective. action-toward compares tags, then applies the stored profile. The reporter returns 0 for cooperate or 1 for defect. It performs no random draw and uses no encounter history.
+
+pd-payoff retains O_2's payoffs: CC gives 2 each; CD gives -1 to the cooperator and 3 to the defector; DD gives 0 each. receive-payoff updates score and calls mark-participation, which records played? without changing colors.
+
+### Birth, inheritance, and death
+
+birth-probability reports 12 + current-tick score, bounded to 0-100 percent. reproduce gives each agent present at the start of the stage one birth attempt. A successful attempt also requires an empty neighbors4 patch. No empty neighboring patch means no newborn. Scores are not spent.
+
+hatch inherits the parent's group-tag and profile unchanged. It places the offspring on a randomly selected empty neighboring patch, resets score to zero and played? to false, and retains the inherited appearance. Newborns do not play or reproduce until the next tick, but are included in the current tick's death stage.
+
+face-death gives each agent an independent 10% death chance, regardless of score. Isolates skip games but can reproduce and die. No mutation or immigration occurs, so lost profiles cannot return.
+
+### What remains random?
+
+Setup locations, initial group and profile assignments, activation order, birth and death events, and vacant birth-patch selection remain random. Cooperation choices do not: a given profile always responds the same way to the same/different group relationship.
+
+Replacing two independently random initial Boolean flags with a uniformly selected profile preserves the four possible behavioral patterns and their expected initial frequencies. Exact trajectories under the same seed may differ because the random draws change.
+
+### Appearance and population plot
+
+Colors show group: tag 0 blue, 1 green, 2 orange, 3 violet. Shapes show profile. update-appearance derives color and shape from these stored states. Agents use group-tag and profile, not display color or shape, to decide. There is no red player or yellow patch highlighting.
+
+The plot counts profiles across every group: Humanitarian black, Ethnocentric red, Egoist blue, Traitorous green. Plot colors identify profiles, while world colors identify tags.
+
+Each pen calls its named count reporter, which directly counts profile values. The four counts sum to count turtles. Population reports the total. Scores remain internal to reproduction.
+
+### Comparison with O_3 and Hammond–Axelrod
+
+O_3 carries scores across an agent's life. O_4 forgets past payoffs before each new round of games. An agent that previously scored +8 but earns -2 this tick has a birth chance of 10%, not 18%.
+
+With up to four neighboring games and payoffs -1, 0, 2, or 3, a current-tick score ranges from -4 to +12. Birth probability therefore ranges from 8% to 24%. Existing agents keep the score through reproduction and death, until the next reset; newborns start at zero.
+
+Resetting score to zero and then using 12 + score is equivalent to resetting reproductive potential to 12% before applying current-period PD increments. This aligns payoff persistence with HA. Four profiles represent the same behavior combinations as their two cooperation flags. Our initial population and world size remain teaching choices. O_4 has no mutation or immigration.
+
+Source: Hammond and Axelrod (2006), The Evolution of Ethnocentrism, manuscript pp. 4 and 8-9: https://websites.umich.edu/~axe/research/Hammond%20and%20Axelrod%20JCR%2006.pdf
+
+### Credits
+
+Professor Jose Manuel MAGALLANES  
+Complexity and ABM, 2026  
+DACSS - UMASS
 ]]></info>
   <turtleShapes>
     <shape name="default" rotatable="true" editableColorIndex="0">
