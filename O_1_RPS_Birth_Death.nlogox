@@ -1,53 +1,117 @@
 <?xml version="1.0" encoding="utf-8"?><model version="NetLogo 7.0.3" snapToGrid="false">
-  <code><![CDATA[turtles-own [score played? original-color]
+  <code><![CDATA[turtles-own [
+  score
+  played?
+  original-color
+]
+
+
+;; Observer procedures
 
 to setup
   clear-all
   ask patches [ set pcolor white ]
-  ask n-of 100 patches [
-    sprout 1 [
-    set shape "circle"
-    set original-color blue
-    set color original-color
-    set size 0.8
-    set score 0
-    set played? false
-    ]
-  ]
+  populate
   reset-ticks
 end
 
 to go
-  if not any? turtles [ stop ]
+  if ticks >= 2000 or count turtles = 0 [ stop ]
+
+  clear-participation
+  let players turtles with [
+    count turtles-on neighbors4 > 0
+  ]
+  ask players [ play ]
+  ask turtles [ reproduce ]
+  ask turtles [ face-death ]
+  tick
+end
+
+to clear-participation
   ask patches [ set pcolor white ]
   ask turtles [
     set color original-color
     set played? false
   ]
-  ; Stationary agents: each undirected neighbor pair plays once.
-  ; The who comparison prevents counting the same pair twice.
-  ask turtles [
-    let focal self
-    ask turtles-on neighbors4 [
-      if who > [who] of focal [
-        play-rps focal
-      ]
-    ]
-  ]
-  ; Only agents present at the start of this stage can reproduce.
-  ask turtles [ reproduce ]
-  ; Random death is independent of score; newborns are included.
-  ask turtles [
-    if random-float 100 < 10 [ die ]
-  ]
-  tick
 end
+
+to populate
+  ask n-of 100 patches [
+    sprout 1 [ initialize-agent ]
+  ]
+end
+
+
+
+
+;; Turtle procedures
+
+to initialize-agent
+  set shape "circle"
+  set size 0.8
+  set original-color blue
+  set color original-color
+  set score 0
+  set played? false
+end
+
+to play
+  ; Each neighboring pair plays once, rather than once per agent.
+  let focal self
+  let opponents (turtles-on neighbors4) with [
+    who > [who] of focal
+  ]
+
+  ask opponents [
+    ; Inside this ask, self is the neighbor and focal is the initiator.
+    let my-move random 3
+    let their-move random 3
+    let payoff rps-payoff my-move their-move
+
+    receive-payoff payoff
+    ask focal [ receive-payoff (- payoff) ]
+  ]
+end
+
+to receive-payoff [points]
+  set score score + points
+  mark-participation
+end
+
+to mark-participation
+  set played? true
+  set color red
+  ask patch-here [ set pcolor yellow ]
+end
+
+
+;; Game rules
+
+to-report rps-payoff [my-move their-move]
+  ; 0 = rock, 1 = paper, 2 = scissors.
+
+  if my-move = their-move [
+    report 0
+  ]
+
+  ; Rock beats scissors, paper beats rock,
+  ; scissors beats paper.
+  if (my-move = 0 and their-move = 2) or
+     (my-move = 1 and their-move = 0) or
+     (my-move = 2 and their-move = 1) [
+    report 1
+  ]
+
+  report -1
+end
+;; Demographic procedures: all agents are eligible, including isolates.
 
 to reproduce
   let birth-chance max (list 0 (min (list 100 (12 + score))))
   if random-float 100 < birth-chance [
-    let vacancies neighbors4 with [not any? turtles-here]
-    if any? vacancies [
+    let vacancies neighbors4 with [count turtles-here = 0]
+    if count vacancies > 0 [
       let destination one-of vacancies
       hatch 1 [
         move-to destination
@@ -59,34 +123,27 @@ to reproduce
   ]
 end
 
-to play-rps [opponent]
-  ; Coding: 0 = rock, 1 = paper, 2 = scissors.
-  ; Each player makes an independent, uniformly random choice.
-  let my-move random 3
-  let their-move random 3
-  let payoff 0  ; a tie gives zero
+to face-death
+  if random-float 100 < 10 [ die ]
+end
 
-  ; I win: rock beats scissors, paper beats rock,
-  ; scissors beats paper.
-  if (my-move = 0 and their-move = 2) or
-     (my-move = 1 and their-move = 0) or
-     (my-move = 2 and their-move = 1) [
-    set payoff 1
-  ]
+;; Observer output procedures
 
-  ; If our moves differ and I did not win, I lost.
-  if my-move != their-move and payoff = 0 [
-    set payoff -1
-  ]
-  set score score + payoff
-  set played? true
-  set color red
-  ask patch-here [ set pcolor yellow ]
-  ask opponent [
-    set score score - payoff
-    set played? true
-    set color red
-    ask patch-here [ set pcolor yellow ]
+to-report mean-score
+  let scores [score] of turtles
+  if empty? scores [ report 0 ]
+  report mean scores
+end
+
+to update-score-histogram
+  let scores [score] of turtles
+  clear-plot
+  if not empty? scores [
+    let lowest min scores
+    let highest max scores
+    set-plot-x-range (lowest - 0.5) (highest + 0.5)
+    set-histogram-num-bars (highest - lowest + 1)
+    histogram scores
   ]
 end
 ]]></code>
@@ -95,39 +152,98 @@ end
     <button x="10" y="10" width="95" height="40" display="setup" forever="false" kind="Observer" disableUntilTicks="false">setup</button>
     <button x="115" y="10" width="95" height="40" display="go" forever="true" kind="Observer" disableUntilTicks="true">go</button>
     <button x="220" y="10" width="95" height="40" display="go once" forever="false" kind="Observer" disableUntilTicks="true">go</button>
-    <monitor x="455" y="65" width="155" height="60" display="Mean score" precision="3" fontSize="12">ifelse-value any? turtles [mean [score] of turtles] [0]</monitor>
+    <monitor x="455" y="65" width="155" height="60" display="Mean score" precision="3" fontSize="12">mean-score</monitor>
     <plot x="455" y="140" width="440" height="350" display="Score histogram" xAxis="Score" yAxis="Number of agents" xMin="-5.0" xMax="6.0" yMin="0.0" yMax="100.0" autoPlotX="true" autoPlotY="true" legend="false">
       <setup/>
-      <update>clear-plot
-if any? turtles [
-  set-plot-x-range (min [score] of turtles - 0.5) (max [score] of turtles + 0.5)
-  set-histogram-num-bars (max [score] of turtles - min [score] of turtles + 1)
-  histogram [score] of turtles
-]</update>
+      <update>update-score-histogram</update>
       <pen display="agents" interval="1.0" mode="1" color="-13345367" legend="false">
         <setup/>
         <update/>
       </pen>
     </plot>
   <monitor x="625" y="65" width="130" height="60" display="Population" precision="0" fontSize="12">count turtles</monitor></widgets>
-  <info><![CDATA[## O_1: RPS with birth and random death
+  <info><![CDATA[## O_1: RPS with birth and death
 
-This version keeps O_0's random RPS game and stationary four-neighbor interactions. It adds demographic consequences, not PD, learning, or different inherited strategies.
+### Purpose
 
-Setup: exactly 100 agents, score zero, on distinct randomly chosen patches in a 33 by 33 wrapping world.
+Add demographic consequences to O_0: agents still identify neighboring partners and play random RPS, but scores now affect birth chances and death changes the population. Individuals stay in place; spatial change comes from births and deaths.
 
-Each tick:
-1. Clear highlights and reset player colors.
-2. Each occupied neighbors4 pair plays RPS once, with independent random choices. Winner +1, loser -1, tie 0. Every agent plays all occupied neighbors, up to four games.
-3. Each existing agent gets one reproduction attempt, in random order. Birth chance (%) = max(0, min(100, 12 + score)). Score is cumulative. Examples: score -5 -> 7%; score 0 -> 12%; score 5 -> 17%. A successful attempt produces one offspring on a randomly selected empty neighbors4 patch if available. No empty patch means no birth. Scores are not spent. Newborns start at zero and do not play or reproduce until the next tick.
-4. Every agent, including newborns, independently has a 10% chance of death, regardless of score.
-5. Advance tick and update displays. Stop if population is extinct.
+### How to use
 
-The 12% baseline and 10% death probability are teaching choices borrowed from Hammond-Axelrod. Applying 12 + cumulative RPS score is our simple extension, not their reproduction rule. In their model reproductive potential resets each cycle; here scores accumulate. All agents still use the same random behavior: this demonstrates score-dependent reproductive success without selection among different inherited strategies.
+Click setup, then go for continuous execution or go once for one tick. The model stops at 2000 ticks or when no agents remain. There is no immigration in O_1, so extinction is permanent until setup runs again.
 
-Agents never move after placement; only offspring placement changes occupancy. At most one agent occupies a patch. Red surviving agents played this tick. Yellow patches mark where games occurred, even if a player subsequently died. Scores of survivors need not sum to zero after death and birth, even though each RPS game remains zero-sum.
+### Agent states
 
-Population monitor shows current count. Histogram shows surviving agents' cumulative scores. Mean score displays 0 when extinct; the histogram is then empty.
+- `score`: accumulated RPS payoff, initially zero. It persists across ticks and affects birth probability.
+- `played?`: whether the agent has played this tick. It resets each tick and records participation without limiting further games.
+- `original-color`: blue, restored when clearing participation highlights.
+
+### Setup and arena
+
+`setup` clears the world, colors patches white, calls `populate`, and initializes CLOCK with `reset-ticks`. `populate` selects 100 distinct patches and creates one agent on each through `initialize-agent`.
+
+The world is a 33 by 33 wrapping grid. At most one agent occupies each patch. Agents never relocate after placement. `move-to` inside `hatch` places a NEW offspring on its birth patch; it does not move the parent.
+
+### The go procedure
+
+1. Check the fixed 2000-tick limit and extinction condition.
+2. `clear-participation`: restore original colors, clear patch highlights, and reset `played?`. Scores remain unchanged.
+3. Select players with `count turtles-on neighbors4 > 0`.
+4. `ask players [ play ]`: complete all neighboring-pair games.
+5. `ask turtles [ reproduce ]`: give each agent present at the start of this stage one birth attempt, in random order.
+6. `ask turtles [ face-death ]`: apply random death to the current population, including newborns.
+7. `tick`: advance CLOCK and update displays.
+
+Filtering players excludes isolates from games only. Every existing agent, including an isolate, is still eligible to reproduce and die.
+
+### Playing RPS
+
+`play` identifies all agents on the four cardinally adjacent patches. Wrapping edges count; diagonals and the same patch do not. The higher-`who` comparison makes each occupied neighboring pair play once per tick. No single partner is selected with `one-of`.
+
+Within `ask opponents`, the neighbor is active and `focal` identifies the initiating agent. Both players choose independent random moves: 0 rock, 1 paper, 2 scissors. `rps-payoff` reports +1 for a win, 0 for a tie, and -1 for a loss. `receive-payoff` updates score and calls `mark-participation` for both players with opposite payoffs.
+
+All pair interactions finish before reproduction begins. An agent can play up to four games per tick. The count-based player check avoids the incorrect neighbor selection reproduced with `any? turtles-on neighbors4` in NetLogo Web.
+
+### Birth
+
+`reproduce` uses birth probability (%) = 12 + cumulative score, bounded to 0–100. For example: score -5 gives 7%; score 0 gives 12%; score +5 gives 17%.
+
+A successful probability check requires an empty neighbors4 patch. `one-of vacancies` chooses the offspring's location randomly. If no patch is available, no offspring is born. The parent stays in place and does not spend its score.
+
+`hatch` copies the parent, places the offspring on the selected patch, resets its score to zero and `played?` to false, and restores its original color. There are no different inherited playing strategies or mutations in O_1. Newborns do not play or reproduce until the next tick, but they are included in the current tick's death stage.
+
+### Death
+
+`face-death` gives each agent an independent 10% chance of dying per tick, regardless of score. Death creates vacancies after reproduction, so these vacancies become available for birth on later ticks.
+
+### Visual indicators and outputs
+
+Red agents played during the current tick. Yellow patches mark game locations, even if a player subsequently died. Newborns start blue. Isolates do not play, but they may reproduce, die, or acquire new neighbors through population turnover.
+
+The histogram shows scores of surviving agents. Each RPS game is zero-sum, but population mean score need not remain zero after agents die. Newborns start at zero. The population monitor reports current count. At extinction, the histogram is empty and the mean-score monitor displays zero as a placeholder.
+
+### What changes from O_0?
+
+Birth and death add demographic turnover to the same encounter and RPS mechanism. Because all agents use identical random choices, O_1 demonstrates score-dependent reproductive success without competition between different inherited strategies.
+
+### Relation to Hammond–Axelrod
+
+The baseline birth chance of 12%, random death chance of 10%, and 2000-period horizon borrow teaching values from Hammond and Axelrod. The link between cumulative RPS score and birth is our teaching assumption. Their model uses PD and resets reproductive potential each cycle. Later versions address these differences.
+
+Source: Hammond and Axelrod (2006), The Evolution of Ethnocentrism, manuscript pp. 4 and 8–9: https://websites.umich.edu/~axe/research/Hammond%20and%20Axelrod%20JCR%2006.pdf
+
+### Credits
+
+Professor Jose Manuel MAGALLANES  
+Complexity and ABM, 2026  
+DACSS - UMASS
+
+
+### Output procedures and NetLogo Web
+
+The Mean score monitor calls `mean-score`. It calculates the mean from current surviving agents and reports zero when the population is empty. Zero at extinction is a display placeholder, not an average over agents.
+
+The plot calls `update-score-histogram`. This procedure clears the previous distribution, collects current scores, and sets integer-width bins from the current minimum to maximum before drawing the histogram. An empty population leaves an empty plot. These calculations live in the code rather than complex widget expressions, keeping output logic explicit and supporting NetLogo Web import. Game, birth, death, and stopping rules are unchanged.
 ]]></info>
   <turtleShapes>
     <shape name="default" rotatable="true" editableColorIndex="0">
